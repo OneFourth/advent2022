@@ -5,6 +5,12 @@ struct Elf {
     food: Vec<usize>,
 }
 
+impl Elf {
+    fn get_total(&self) -> usize {
+        self.food.iter().sum()
+    }
+}
+
 #[derive(Debug)]
 struct Day01 {
     elves: Vec<Elf>,
@@ -25,19 +31,14 @@ impl Day for Day01 {
     fn part1(&self) -> String {
         self.elves
             .iter()
-            .map(|e| e.food.iter().sum::<usize>())
+            .map(Elf::get_total)
             .max()
             .expect("No elf")
             .to_string()
     }
 
     fn part2(&self) -> String {
-        let mut sorted: Vec<_> = self
-            .elves
-            .iter()
-            .map(|e| e.food.iter().sum::<usize>())
-            .collect();
-
+        let mut sorted: Vec<_> = self.elves.iter().map(Elf::get_total).collect();
         sorted.sort();
 
         sorted.iter().rev().take(3).sum::<usize>().to_string()
