@@ -3,8 +3,6 @@ use util::*;
 #[derive(Debug)]
 struct Grid {
     map: Vec<Vec<u32>>,
-    width: isize,
-    height: isize,
 }
 
 type Position = (isize, isize);
@@ -16,16 +14,52 @@ impl Grid {
             .map(|l| l.chars().map(|c| c.to_digit(10).unwrap()).collect())
             .collect();
 
-        let width = map[0].len() as isize;
-        let height = map.len() as isize;
-
-        Self { map, width, height }
+        Self { map }
     }
 
     fn get(&self, (x, y): Position) -> Option<u32> {
         self.map
             .get(y as usize)
             .and_then(|v| v.get(x as usize).copied())
+    }
+
+    fn positions(&self) -> GridPosIterator {
+        GridPosIterator {
+            position: (0, 0),
+            grid: self,
+        }
+    }
+
+    fn direction_iter(&self, position: Position, direction: Position) -> GridIterator {
+        GridIterator {
+            position,
+            direction,
+            grid: self,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GridPosIterator<'a> {
+    position: Position,
+    grid: &'a Grid,
+}
+
+impl<'a> Iterator for GridPosIterator<'a> {
+    type Item = (Position, u32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let x_move = (self.position.0 + 1, self.position.1);
+        let y_move = (0, self.position.1 + 1);
+        if let Some(v) = self.grid.get(x_move) {
+            self.position = x_move;
+            Some((x_move, v))
+        } else if let Some(v) = self.grid.get(y_move) {
+            self.position = y_move;
+            Some((y_move, v))
+        } else {
+            None
+        }
     }
 }
 
@@ -62,23 +96,14 @@ impl Day for Day08 {
         let directions = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
         let mut valid_trees = Vec::new();
-        for y in 0..self.grid.height {
-            for x in 0..self.grid.width {
-                let pos = (x, y);
-                let value = self.grid.get(pos).unwrap();
-                let valid = directions.iter().any(|direction| {
-                    let mut it = GridIterator {
-                        position: pos,
-                        direction: *direction,
-                        grid: &self.grid,
-                    };
 
-                    it.all(|c| c < value)
-                });
+        for (pos, value) in self.grid.positions() {
+            let valid = directions
+                .iter()
+                .any(|&dir| self.grid.direction_iter(pos, dir).all(|c| c < value));
 
-                if valid {
-                    valid_trees.push(pos);
-                }
+            if valid {
+                valid_trees.push(pos);
             }
         }
 
@@ -89,34 +114,24 @@ impl Day for Day08 {
         let directions = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
         let mut scores = Vec::new();
-        for y in 0..self.grid.height {
-            for x in 0..self.grid.width {
-                let pos = (x, y);
-                let value = self.grid.get(pos).unwrap();
-                let score: usize = directions
-                    .iter()
-                    .map(|direction| {
-                        let it = GridIterator {
-                            position: pos,
-                            direction: *direction,
-                            grid: &self.grid,
-                        };
-
-                        let mut score = 0;
-                        for v in it {
-                            if v < value {
-                                score += 1;
-                            } else {
-                                score += 1;
-                                break;
-                            }
+        for (pos, value) in self.grid.positions() {
+            let score: usize = directions
+                .iter()
+                .map(|&dir| {
+                    let mut score = 0;
+                    for v in self.grid.direction_iter(pos, dir) {
+                        if v < value {
+                            score += 1;
+                        } else {
+                            score += 1;
+                            break;
                         }
-                        score
-                    })
-                    .product();
+                    }
+                    score
+                })
+                .product();
 
-                scores.push(score);
-            }
+            scores.push(score);
         }
 
         scores.iter().max().unwrap().to_string()
