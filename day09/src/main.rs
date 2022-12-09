@@ -47,6 +47,28 @@ struct Day09 {
     steps: Vec<Step>,
 }
 
+impl Day09 {
+    fn apply_steps<const ROPE_SIZE: usize>(&self) -> usize {
+        assert!(ROPE_SIZE > 1);
+
+        let mut positions = [Position::new(); ROPE_SIZE];
+        let mut unique_pos = HashSet::new();
+        for s in &self.steps {
+            for _ in 0..s.count {
+                positions[0].apply(s.direction);
+
+                for i in 1..positions.len() {
+                    positions[i].follow(positions[i - 1]);
+                }
+
+                unique_pos.insert(*positions.last().unwrap());
+            }
+        }
+
+        unique_pos.len()
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 struct Position {
     x: isize,
@@ -86,40 +108,11 @@ impl Day for Day09 {
     }
 
     fn part1(&self) -> String {
-        let mut h = Position::new();
-        let mut t = Position::new();
-
-        let mut unique_pos = HashSet::new();
-
-        for s in &self.steps {
-            for _ in 0..s.count {
-                h.apply(s.direction);
-                t.follow(h);
-                unique_pos.insert(t);
-            }
-        }
-
-        unique_pos.len().to_string()
+        self.apply_steps::<2>().to_string()
     }
 
     fn part2(&self) -> String {
-        let mut h = Position::new();
-        let mut t = [Position::new(); 9];
-
-        let mut unique_pos = HashSet::new();
-
-        for s in &self.steps {
-            for _ in 0..s.count {
-                h.apply(s.direction);
-                t[0].follow(h);
-                for i in 1..t.len() {
-                    t[i].follow(t[i - 1]);
-                }
-                unique_pos.insert(*t.last().unwrap());
-            }
-        }
-
-        unique_pos.len().to_string()
+        self.apply_steps::<10>().to_string()
     }
 
     fn number() -> u8 {
