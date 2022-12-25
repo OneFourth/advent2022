@@ -8,6 +8,7 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::IResult;
 use pathfinding::directed::astar::astar;
+
 use util::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -140,6 +141,12 @@ fn parse_valve(input: &str) -> IResult<&str, (ValveName, Valve)> {
     )(input)
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Turn {
+    Mine,
+    Elephant,
+}
+
 impl Day for Day16 {
     fn parse_input(input: &str) -> Self {
         let valves = input.lines().map(|l| parse_valve(l).unwrap().1).collect();
@@ -173,7 +180,66 @@ impl Day for Day16 {
     }
 
     fn part2(&self) -> String {
-        todo!()
+        let start = (
+            State {
+                position: ValveName::new("AA"),
+                open_valves: BTreeSet::new(),
+                flow: 0,
+                time: 5,
+            },
+            ValveName::new("AA"),
+            Turn::Mine,
+        );
+
+        let path = astar(
+            &start,
+            |(n, eleph_position, turn)| match turn {
+                Turn::Mine => n
+                    .successors(&self.valves)
+                    .into_iter()
+                    .map(|(mut s, cost)| {
+                        s.time -= 1;
+                        ((s.clone(), *eleph_position, Turn::Elephant), cost)
+                    })
+                    .collect::<Vec<_>>(),
+
+                Turn::Elephant => {
+                    static mut COUNT: isize = 0;
+                    let mut e = n.clone();
+                    let my_position = std::mem::replace(&mut e.position, *eleph_position);
+                    e.successors(&self.valves)
+                        .into_iter()
+                        .map(|(mut s, cost)| {
+                            unsafe {
+                                if s.time > COUNT {
+                                    COUNT = s.time;
+                                    dbg!(COUNT);
+                                }
+                            };
+                            let eleph_position = s.position;
+                            s.position = my_position;
+                            ((s.clone(), eleph_position, Turn::Mine), cost)
+                        })
+                        .collect()
+                }
+            },
+            |(n, _, _)| (n.time - 26) * n.flow,
+            |(n, _, t)| (n.time == 30 && *t == Turn::Elephant),
+        )
+        .unwrap();
+
+        let mut released = 0;
+        for v in path.0.chunks_exact(2) {
+            if let [(s1, _, _), (s2, e, _)] = v {
+                println!("\t{s1}");
+                let mut s = s2.clone();
+                s.position = *e;
+                println!("\t{s}");
+                released += s1.flow;
+            }
+        }
+
+        released.to_string()
     }
 
     fn number() -> u8 {
