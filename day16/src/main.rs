@@ -8,6 +8,8 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::IResult;
 use pathfinding::directed::astar::astar;
+use pathfinding::directed::bfs::bfs;
+use pathfinding::directed::dijkstra::dijkstra_all;
 
 use util::*;
 
@@ -37,14 +39,15 @@ struct State {
     open_valves: BTreeSet<ValveName>,
     flow: isize,
     time: isize,
+    total: isize,
 }
 
 impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:>2}: {:>4} at {}, open:",
-            self.time, self.flow, self.position
+            "{:>2}: total: {:>4} at {}, open:",
+            self.time, self.total, self.position
         )?;
 
         for (i, n) in self.open_valves.iter().enumerate() {
@@ -60,56 +63,71 @@ impl std::fmt::Display for State {
 }
 
 impl State {
-    fn successors(&self, g: &Graph) -> Vec<(Self, isize)> {
+    fn successors(&self, g: &HashMap<ValveName, Valve>) -> Vec<(Self, isize)> {
         let mut new_states = Vec::new();
-
-        let v = g.get(&self.position).unwrap();
 
         let pressure = g
             .iter()
             .filter_map(|(n, v)| (!self.open_valves.contains(n)).then_some(v.rate))
             .sum::<isize>();
 
-        if v.rate > 0 && !self.open_valves.contains(&self.position) {
-            let mut open_valves = self.open_valves.clone();
-            open_valves.insert(self.position);
+        let v = g.get(&self.position).unwrap();
 
-            new_states.push((
-                Self {
-                    position: self.position,
-                    open_valves,
-                    flow: self.flow + v.rate,
-                    time: self.time + 1,
-                },
-                pressure,
-            ));
+        let is_starting_place = self.position == ValveName::new("AA");
+        for (name, cost) in &v.paths {
+            let time = self.time + cost;
+            if time <= 30 && *name != ValveName::new("AA") && !self.open_valves.contains(name) {
+                let mut open_valves = self.open_valves.clone();
+                open_valves.insert(*name);
+
+                let next = g.get(name).unwrap();
+                let flow = self.flow + next.rate;
+
+                new_states.push((
+                    Self {
+                        position: *name,
+                        open_valves,
+                        flow,
+                        time,
+                        total: self.total + (cost * self.flow),
+                    },
+                    pressure * cost,
+                ));
+            }
         }
 
-        for p in &v.paths {
+        if new_states.is_empty() && !is_starting_place && (self.time + 1) <= 30 {
             new_states.push((
                 Self {
-                    position: *p,
+                    time: self.time + 1,
                     open_valves: self.open_valves.clone(),
-                    flow: self.flow,
-                    time: self.time + 1,
+                    total: self.total + self.flow,
+                    ..*self
                 },
                 pressure,
             ));
         }
+
+        /*
+        println!("{self}");
+        for (s, cost) in &new_states {
+            println!("{cost:>4} {s}");
+        }
+        println!();
+        */
 
         new_states
     }
 }
 
+#[derive(Debug)]
 struct Valve {
-    paths: Vec<ValveName>,
+    paths: HashMap<ValveName, isize>,
     rate: isize,
 }
 
-type Graph = HashMap<ValveName, Valve>;
-
 struct Day16 {
-    valves: Graph,
+    valves: HashMap<ValveName, Valve>,
 }
 
 fn parse_number(input: &str) -> IResult<&str, isize> {
@@ -124,7 +142,7 @@ fn parse_list(input: &str) -> IResult<&str, Vec<ValveName>> {
     separated_list1(tag(", "), parse_name)(input)
 }
 
-fn parse_valve(input: &str) -> IResult<&str, (ValveName, Valve)> {
+fn parse_valve(input: &str) -> IResult<&str, (ValveName, (Vec<ValveName>, isize))> {
     map(
         tuple((
             tag("Valve "),
@@ -137,19 +155,42 @@ fn parse_valve(input: &str) -> IResult<&str, (ValveName, Valve)> {
             )),
             parse_list,
         )),
-        |(_, name, _, rate, _, paths)| (name, Valve { paths, rate }),
+        |(_, name, _, rate, _, paths)| (name, (paths, rate)),
     )(input)
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-enum Turn {
-    Mine,
-    Elephant,
 }
 
 impl Day for Day16 {
     fn parse_input(input: &str) -> Self {
-        let valves = input.lines().map(|l| parse_valve(l).unwrap().1).collect();
+        let whole_graph: HashMap<_, _> = input.lines().map(|l| parse_valve(l).unwrap().1).collect();
+        let targets: Vec<_> = whole_graph
+            .iter()
+            .filter_map(|(name, &(_, rate))| {
+                (rate > 0 || *name == ValveName::new("AA")).then_some(*name)
+            })
+            .collect();
+
+        let mut valves = HashMap::new();
+        for name in &targets {
+            let paths = targets
+                .iter()
+                .filter(|n| *n != name)
+                .map(|n| {
+                    (
+                        *n,
+                        bfs(&name, |v| &whole_graph.get(v).unwrap().0, |v| *v == n)
+                            .unwrap()
+                            .len() as isize,
+                    )
+                })
+                .collect();
+            valves.insert(
+                *name,
+                Valve {
+                    paths,
+                    rate: whole_graph.get(name).unwrap().1,
+                },
+            );
+        }
 
         Self { valves }
     }
@@ -160,6 +201,7 @@ impl Day for Day16 {
             open_valves: BTreeSet::new(),
             flow: 0,
             time: 1,
+            total: 0,
         };
 
         let path = astar(
@@ -170,76 +212,49 @@ impl Day for Day16 {
         )
         .unwrap();
 
-        let mut released = 0;
-        for p in &path.0 {
-            println!("{p}");
-            released += p.flow;
+        for s in &path.0 {
+            println!("{s}");
         }
+
+        let last = path.0.last().unwrap();
+        let released = last.total + last.flow;
 
         released.to_string()
     }
 
     fn part2(&self) -> String {
-        let start = (
-            State {
-                position: ValveName::new("AA"),
-                open_valves: BTreeSet::new(),
-                flow: 0,
-                time: 5,
-            },
-            ValveName::new("AA"),
-            Turn::Mine,
-        );
+        let start = State {
+            position: ValveName::new("AA"),
+            open_valves: BTreeSet::new(),
+            flow: 0,
+            time: 5,
+            total: 0,
+        };
 
-        let path = astar(
-            &start,
-            |(n, eleph_position, turn)| match turn {
-                Turn::Mine => n
-                    .successors(&self.valves)
-                    .into_iter()
-                    .map(|(mut s, cost)| {
-                        s.time -= 1;
-                        ((s.clone(), *eleph_position, Turn::Elephant), cost)
-                    })
-                    .collect::<Vec<_>>(),
+        let paths = dijkstra_all(&start, |n| n.successors(&self.valves));
 
-                Turn::Elephant => {
-                    static mut COUNT: isize = 0;
-                    let mut e = n.clone();
-                    let my_position = std::mem::replace(&mut e.position, *eleph_position);
-                    e.successors(&self.valves)
-                        .into_iter()
-                        .map(|(mut s, cost)| {
-                            unsafe {
-                                if s.time > COUNT {
-                                    COUNT = s.time;
-                                    dbg!(COUNT);
-                                }
-                            };
-                            let eleph_position = s.position;
-                            s.position = my_position;
-                            ((s.clone(), eleph_position, Turn::Mine), cost)
-                        })
-                        .collect()
+        let mut best_paths = HashMap::new();
+        for (s, _) in paths {
+            let value = s.total + s.flow;
+            let e = best_paths.entry(s.open_valves).or_insert(value);
+            *e = value.max(*e);
+        }
+
+        let mut best_paths: Vec<_> = best_paths.iter().collect();
+        best_paths.sort_unstable_by_key(|(_, c)| *c);
+        best_paths.reverse();
+
+        let mut max = 0;
+        for (s, c) in &best_paths {
+            for (_, c2) in best_paths.iter().filter(|(s2, _)| s.is_disjoint(s2)) {
+                let total = *c + *c2;
+                if total > max {
+                    max = total;
                 }
-            },
-            |(n, _, _)| (n.time - 26) * n.flow,
-            |(n, _, t)| (n.time == 30 && *t == Turn::Elephant),
-        )
-        .unwrap();
-
-        let mut released = 0;
-        for v in path.0.chunks_exact(2) {
-            if let [(s1, _, _), (s2, e, _)] = v {
-                println!("\t{s1}");
-                let mut s = s2.clone();
-                s.position = *e;
-                println!("\t{s}");
-                released += s1.flow;
             }
         }
 
-        released.to_string()
+        max.to_string()
     }
 
     fn number() -> u8 {
